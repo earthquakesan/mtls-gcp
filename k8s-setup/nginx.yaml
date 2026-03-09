@@ -19,6 +19,45 @@ spec:
         image: nginx:latest
         ports:
         - containerPort: 80
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: default.conf
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  default.conf: |
+    map $http_x_client_cert_fingerprint $client_authorized {
+        default 0;
+        "UkD4NETfv5agZ1GSek1fjuiLqH9UMownHSEEmOw/B38" 1;
+    }
+
+    server {
+        listen 80;
+        
+        # Add debug header
+        add_header X-Debug-Fingerprint "$http_x_client_cert_fingerprint" always;
+
+        location = /healthz {
+            access_log off;
+            return 200 "OK\n";
+        }
+
+        location / {
+            if ($client_authorized = 0) {
+                return 403 "Forbidden: Invalid Client Certificate Fingerprint: received '$http_x_client_cert_fingerprint'\n";
+            }
+            root /usr/share/nginx/html;
+            index index.html index.htm;
+        }
+    }
 ---
 apiVersion: v1
 kind: Service

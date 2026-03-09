@@ -76,6 +76,28 @@ if ! gcloud compute firewall-rules describe allow-ssh-iap --quiet > /dev/null 2>
         --description="Allow SSH from IAP"
 fi
 
+# Allow Health Checks
+if ! gcloud compute firewall-rules describe allow-lb-health-check --quiet > /dev/null 2>&1; then
+    gcloud compute firewall-rules create allow-lb-health-check \
+        --network=$VPC_NAME \
+        --action=allow \
+        --direction=ingress \
+        --source-ranges=130.211.0.0/22,35.191.0.0/16 \
+        --rules=tcp:80,tcp:443 \
+        --description="Allow Health Checks from GCP"
+fi
+
+# Allow Proxy-only Subnet
+if ! gcloud compute firewall-rules describe allow-proxy-only-subnet --quiet > /dev/null 2>&1; then
+    gcloud compute firewall-rules create allow-proxy-only-subnet \
+        --network=$VPC_NAME \
+        --action=allow \
+        --direction=ingress \
+        --source-ranges=$PROXY_SUBNET_RANGE \
+        --rules=tcp:80,tcp:443,tcp:8080 \
+        --description="Allow traffic from proxy-only subnet"
+fi
+
 # 4. Create Regional GKE Autopilot Cluster
 echo "Creating GKE Autopilot cluster..."
 if ! gcloud container clusters describe $CLUSTER_NAME --region=$REGION --quiet > /dev/null 2>&1; then
@@ -106,7 +128,13 @@ echo "Configuring Load Balancer base..."
 if ! gcloud compute health-checks describe $HEALTH_CHECK_NAME --region=$REGION --quiet > /dev/null 2>&1; then
     gcloud compute health-checks create http $HEALTH_CHECK_NAME \
         --region=$REGION \
-        --use-serving-port
+        --use-serving-port \
+        --request-path=/healthz
+else
+    echo "Updating health check $HEALTH_CHECK_NAME to use /healthz..."
+    gcloud compute health-checks update http $HEALTH_CHECK_NAME \
+        --region=$REGION \
+        --request-path=/healthz
 fi
 
 if ! gcloud compute backend-services describe $BACKEND_SERVICE_NAME --region=$REGION --quiet > /dev/null 2>&1; then
@@ -115,9 +143,13 @@ if ! gcloud compute backend-services describe $BACKEND_SERVICE_NAME --region=$RE
         --protocol=HTTP \
         --health-checks=$HEALTH_CHECK_NAME \
         --health-checks-region=$REGION \
-        --region=$REGION
+        --region=$REGION \
+        --custom-request-header='X-Client-Cert-Fingerprint:{client_cert_sha256_fingerprint}'
 else
-    echo "Backend service $BACKEND_SERVICE_NAME already exists."
+    echo "Backend service $BACKEND_SERVICE_NAME already exists. Updating custom headers..."
+    gcloud compute backend-services update $BACKEND_SERVICE_NAME \
+        --region=$REGION \
+        --custom-request-header='X-Client-Cert-Fingerprint:{client_cert_sha256_fingerprint}'
 fi
 
 # Note: NEGs will be attached later in K8s config.
@@ -131,11 +163,28 @@ if [ -f "certs/root-ca.pem" ]; then
         gcloud certificate-manager trust-configs create $TRUST_CONFIG_NAME \
             --trust-store=trust-anchors=certs/root-ca.pem \
             --location=$REGION --quiet
+    else
+        echo "Updating Trust Config..."
+        gcloud certificate-manager trust-configs update $TRUST_CONFIG_NAME \
+            --trust-store=trust-anchors=certs/root-ca.pem \
+            --location=$REGION --quiet
     fi
    
     # Create Server TLS Policy
     if ! gcloud network-security server-tls-policies describe $SERVER_TLS_POLICY_NAME --location=$REGION --quiet > /dev/null 2>&1; then
         echo "Importing Server TLS Policy..."
+        cat > server-tls-policy.yaml <<EOF
+description: "mTLS policy for internal L7 LB"
+mtlsPolicy:
+  clientValidationMode: REJECT_INVALID
+  clientValidationTrustConfig: projects/$PROJECT_ID/locations/$REGION/trustConfigs/$TRUST_CONFIG_NAME
+EOF
+        gcloud network-security server-tls-policies import $SERVER_TLS_POLICY_NAME \
+            --source=server-tls-policy.yaml \
+            --location=$REGION --quiet
+        rm server-tls-policy.yaml
+    else
+        echo "Server TLS Policy $SERVER_TLS_POLICY_NAME already exists. (Updating policies is usually done via import)"
         cat > server-tls-policy.yaml <<EOF
 description: "mTLS policy for internal L7 LB"
 mtlsPolicy:

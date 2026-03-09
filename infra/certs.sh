@@ -15,15 +15,36 @@ echo "Generating certificates in $CERT_DIR..."
 # 1. Generate Root CA
 echo "Step 1: Generating Root CA..."
 openssl genrsa -out $CERT_DIR/root-ca.key 4096
+
+# Create Root CA config for extensions
+cat > $CERT_DIR/root-ca.ext <<EOF
+[ v3_ca ]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,digitalSignature,cRLSign,keyCertSign
+EOF
+
 openssl req -x509 -new -nodes -key $CERT_DIR/root-ca.key -sha256 -days 3650 \
     -out $CERT_DIR/root-ca.pem \
-    -subj "/C=DE/ST=Berlin/L=Berlin/O=Demo Root CA Inc/CN=mtls-demo-root-ca"
+    -subj "/C=DE/ST=Berlin/L=Berlin/O=Demo Root CA Inc/CN=mtls-demo-root-ca" \
+    -config <(cat /etc/ssl/openssl.cnf <(echo "[req]"; echo "distinguished_name=dn"; echo "[dn]"; echo "[v3_ca]"; cat $CERT_DIR/root-ca.ext)) \
+    -extensions v3_ca
 
 # Copy root-ca.pem to infra directory so provision.sh can find it
 cp $CERT_DIR/root-ca.pem ./infra/root-ca.pem
 
 # 2. Generate 3 Client Certificates
 echo "Step 2: Generating 3 Client Certificates..."
+
+# Create Client Extension config
+cat > $CERT_DIR/client.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+subjectKeyIdentifier = hash
+EOF
 
 # Initialize Fingerprints.md
 echo "# Client Certificate Fingerprints" > Fingerprints.md
@@ -33,9 +54,9 @@ echo "| :--- | :--- | :--- |" >> Fingerprints.md
 # Client 1: Alice Smith
 openssl genrsa -out $CERT_DIR/client1.key 2048
 openssl req -new -key $CERT_DIR/client1.key -out $CERT_DIR/client1.csr \
-    -subj "/C=DE/ST=Berlin/L=Berlin/O=User Group A/CN=alice.smith@example.com/address=123 Maple St"
+    -subj "/C=DE/ST=Berlin/L=Berlin/O=User Group A/CN=alice.smith@example.com"
 openssl x509 -req -in $CERT_DIR/client1.csr -CA $CERT_DIR/root-ca.pem -CAkey $CERT_DIR/root-ca.key \
-    -CAcreateserial -out $CERT_DIR/client1.pem -days 365 -sha256
+    -CAcreateserial -out $CERT_DIR/client1.pem -days 365 -sha256 -extfile $CERT_DIR/client.ext
 # Add to Fingerprints.md
 FP1=$(openssl x509 -noout -fingerprint -sha256 -in $CERT_DIR/client1.pem | cut -d'=' -f2)
 echo "| Client 1 | alice.smith@example.com | $FP1 |" >> Fingerprints.md
@@ -43,9 +64,9 @@ echo "| Client 1 | alice.smith@example.com | $FP1 |" >> Fingerprints.md
 # Client 2: Bob Jones
 openssl genrsa -out $CERT_DIR/client2.key 2048
 openssl req -new -key $CERT_DIR/client2.key -out $CERT_DIR/client2.csr \
-    -subj "/C=DE/ST=Bavaria/L=Munich/O=User Group B/CN=bob.jones@example.com/address=456 Oak Rd"
+    -subj "/C=DE/ST=Bavaria/L=Munich/O=User Group B/CN=bob.jones@example.com"
 openssl x509 -req -in $CERT_DIR/client2.csr -CA $CERT_DIR/root-ca.pem -CAkey $CERT_DIR/root-ca.key \
-    -CAcreateserial -out $CERT_DIR/client2.pem -days 365 -sha256
+    -CAcreateserial -out $CERT_DIR/client2.pem -days 365 -sha256 -extfile $CERT_DIR/client.ext
 # Add to Fingerprints.md
 FP2=$(openssl x509 -noout -fingerprint -sha256 -in $CERT_DIR/client2.pem | cut -d'=' -f2)
 echo "| Client 2 | bob.jones@example.com | $FP2 |" >> Fingerprints.md
@@ -53,9 +74,9 @@ echo "| Client 2 | bob.jones@example.com | $FP2 |" >> Fingerprints.md
 # Client 3: Charlie Brown
 openssl genrsa -out $CERT_DIR/client3.key 2048
 openssl req -new -key $CERT_DIR/client3.key -out $CERT_DIR/client3.csr \
-    -subj "/C=DE/ST=Hamburg/L=Hamburg/O=User Group C/CN=charlie.brown@example.com/address=789 Pine Ave"
+    -subj "/C=DE/ST=Hamburg/L=Hamburg/O=User Group C/CN=charlie.brown@example.com"
 openssl x509 -req -in $CERT_DIR/client3.csr -CA $CERT_DIR/root-ca.pem -CAkey $CERT_DIR/root-ca.key \
-    -CAcreateserial -out $CERT_DIR/client3.pem -days 365 -sha256
+    -CAcreateserial -out $CERT_DIR/client3.pem -days 365 -sha256 -extfile $CERT_DIR/client.ext
 # Add to Fingerprints.md
 FP3=$(openssl x509 -noout -fingerprint -sha256 -in $CERT_DIR/client3.pem | cut -d'=' -f2)
 echo "| Client 3 | charlie.brown@example.com | $FP3 |" >> Fingerprints.md
@@ -71,6 +92,7 @@ cat > $CERT_DIR/server.ext <<EOF
 authorityKeyIdentifier=keyid,issuer
 basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
@@ -89,7 +111,11 @@ if ! gcloud certificate-manager certificates describe $SERVER_CERT_NAME --locati
         --private-key-file=$CERT_DIR/server.key \
         --location=$REGION
 else
-    echo "Certificate $SERVER_CERT_NAME already exists in GCP."
+    echo "Updating Certificate $SERVER_CERT_NAME in GCP..."
+    gcloud certificate-manager certificates update $SERVER_CERT_NAME \
+        --certificate-file=$CERT_DIR/server.pem \
+        --private-key-file=$CERT_DIR/server.key \
+        --location=$REGION
 fi
 
 echo "--------------------------------------------------"
