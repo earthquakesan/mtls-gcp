@@ -1,6 +1,6 @@
 # Client Certificate Fingerprints
 | Client | CN | Fingerprint (SHA256) |
 | :--- | :--- | :--- |
-| Client 1 | alice.smith@example.com | 52:40:F8:34:44:DF:BF:96:A0:67:51:92:7A:4D:5F:8E:E8:8B:A8:7F:54:32:8C:27:1D:21:04:98:EC:3F:07:7F |
-| Client 2 | bob.jones@example.com | 61:7C:8F:30:10:8B:39:1C:57:C5:7F:7E:32:63:3E:82:8C:F4:74:8A:28:8A:46:03:86:D2:69:85:C4:B7:10:56 |
-| Client 3 | charlie.brown@example.com | 47:57:4C:40:7F:5B:13:D1:57:78:0D:2D:02:94:C4:C2:FF:DD:15:BB:37:2A:5B:9D:FE:F2:51:4E:19:6C:A0:75 |
+| Client 1 | alice.smith@example.com | FC:CE:5D:BF:7C:8D:0E:36:84:49:43:DA:39:FD:C8:F8:64:9E:AB:D2:29:DE:76:93:04:7C:8A:76:38:D3:10:CA |
+| Client 2 | bob.jones@example.com | 4F:B2:05:E5:1C:C6:4F:09:0D:01:A7:40:0F:C5:D5:11:F4:93:35:B0:5D:29:EA:E8:0C:B0:FE:60:A5:F6:75:36 |
+| Client 3 | charlie.brown@example.com | 7A:2A:8D:55:5F:B3:6A:8D:15:E6:75:D3:14:F8:D6:02:50:BE:25:FA:56:57:11:61:8B:CA:C5:FE:2A:E5:36:91 |
